@@ -32,6 +32,11 @@ project-root/
 └── README.md
 ```
 ## Setup 
+Run:
+```
+npm install
+```
+
 Create a firebase-admin.ts file: 
 ```
 import admin from "firebase-admin"

@@ -10,7 +10,7 @@ import { Stringifier } from 'postcss'
 const prompt = promptSync({ sigint: true })
 
 // Type
-type PendingPhoto {
+type PendingPhoto = {
   filePath: string
   hash: string
 }
@@ -67,6 +67,13 @@ async function hashExists(hash: string): Promise<boolean> {
     .get()
 
   return !snap.empty
+}
+
+function renderScanProgress(done: number, total: number) {
+  process.stdout.write(
+    `\r🔍 Scanning photos ${done}/${total}`
+  )
+  if (done === total) process.stdout.write('\n')
 }
 
 // ---------- Get next IMG number ----------
@@ -133,16 +140,19 @@ async function uploadPhotos() {
   let failed: string[] = []
 
   const pending: PendingPhoto[] = []
+  let scanned = 0
 
   for (const filePath of allFiles) {
     const hash = await hashFile(filePath)
 
     if (await hashExists(hash)) {
       process.stdout.write(` Skipped duplicate: ${path.basename(filePath)}\n`)
-      continue
+    } else {
+      pending.push({ filePath, hash })
     }
 
-    pending.push({ filePath, hash })
+    scanned++
+    renderScanProgress(scanned, allFiles.length)
   }
 
   if (pending.length === 0) {
@@ -366,13 +376,13 @@ async function resetCloudinary() {
 async function main() {
   while (true) {
     console.log(`
-What do you want to do?
-1) Upload photos
-2) Set featured photos
-3) Remove all featured photos
-4) Reset database (PROCEED WITH CAUTION)
-5) Exit
-`)
+                What do you want to do?
+                1) Upload photos
+                2) Set featured photos
+                3) Remove all featured photos
+                4) Reset database (PROCEED WITH CAUTION)
+                5) Exit
+                `)
 
     const choice = prompt('Select an option: ')
 
