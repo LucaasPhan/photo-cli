@@ -37,21 +37,8 @@ Run:
 npm install
 ```
 
-Create a firebase-admin.ts file: 
-```
-import admin from "firebase-admin"
-import serviceAccount from "../../credentials/firebase-admin.json"
-
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount as admin.ServiceAccount),
-  })
-}
-
-export const adminDb = admin.firestore()
-```
-Then create a file from root/credentials/firebase-admin.json<br>
-Copy the private key from Firebase in
+Save the private key from Firebase consolve in root/credentials/firebase-admin.json<br>
+Then rename it `firebase-admin.json`
 
 
 ## Environment Variables
