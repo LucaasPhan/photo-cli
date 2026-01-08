@@ -6,9 +6,16 @@ import promptSync from 'prompt-sync'
 import { adminDb } from './firebase-admin'
 import { v2 as cloudinary } from 'cloudinary'
 import crypto from "crypto"
-
+import { Stringifier } from 'postcss'
 const prompt = promptSync({ sigint: true })
 
+// Type
+type PendingPhoto {
+  filePath: string
+  hash: string
+}
+
+// Error handling
 class UploadError extends Error {
     constructor(
       message: string,
@@ -30,6 +37,7 @@ cloudinary.config({
   api_key: process.env.CLOUDINARY_API_KEY!,
   api_secret: process.env.CLOUDINARY_API_SECRET!,
 })
+const CLOUDINARY_FOLDER = 'photo-portfolio'
 
 // ---------- Utils ----------
 function isImage(file: string) {
@@ -124,18 +132,41 @@ async function uploadPhotos() {
   let completed = 0
   let failed: string[] = []
 
+  const pending: PendingPhoto[] = []
+
+  for (const filePath of allFiles) {
+    const hash = await hashFile(filePath)
+
+    if (await hashExists(hash)) {
+      process.stdout.write(` Skipped duplicate: ${path.basename(filePath)}\n`)
+      continue
+    }
+
+    pending.push({ filePath, hash })
+  }
+
+  if (pending.length === 0) {
+    console.log('No new photos to upload')
+    return
+  }
+
+  const uploadQueue = pending.map((item, index) => ({
+    ...item,
+    id: `IMG-${String(counter + index).padStart(4, '0')}`
+  }))
+
   console.log(`📸 Found ${allFiles.length} photos`)
   console.log(`➡ Starting from IMG-${String(counter).padStart(4, '0')}\n`)
 
-  for (let i = 0; i < allFiles.length; i += CONCURRENCY) {
-    const batch = allFiles.slice(i, i + CONCURRENCY)
+  for (let i = 0; i < uploadQueue.length; i += CONCURRENCY) {
+    const batch = uploadQueue.slice(i, i + CONCURRENCY)
 
     await Promise.all(
-      batch.map(async filePath => {
-        const id = `IMG-${String(counter++).padStart(4, '0')}`
+      batch.map(async item => {
+        const { filePath, id } = item
 
         try {
-          await processPhoto(filePath, id)
+          await processPhoto(filePath, id, item.hash)
           completed++
         } catch (err: any) {
           failed.push(id)
@@ -163,18 +194,11 @@ async function uploadPhotos() {
 // ---------- Process Photo ----------
 async function processPhoto(
   filePath: string,
-  id: string
+  id: string, 
+  fileHash: string
 ) {
-  const fileHash = await hashFile(filePath)
-
   // 🔍 Skip duplicate content (hash-based)
-  const duplicate = await adminDb
-    .collection(COLLECTION)
-    .where('hash', '==', fileHash)
-    .limit(1)
-    .get()
-
-  if (!duplicate.empty) {
+  if (await hashExists(fileHash)) {
     process.stdout.write(` Skipped duplicate: ${path.basename(filePath)}`)
     return
   }
@@ -190,10 +214,27 @@ async function processPhoto(
   })
 
   const upload = await cloudinary.uploader.upload(filePath, {
-    folder: 'photo-portfolio',
+    folder: CLOUDINARY_FOLDER,
     public_id: id,
     unique_filename: false,
     overwrite: false,
+  
+    transformation: [
+      // If width is the long side and > 2048
+      {
+        if: 'w_gt_2048',
+        width: 2048,
+        height: 2048,
+        crop: 'limit',
+      },
+      // If height is the long side and > 2048
+      {
+        if: 'h_gt_2048',
+        width: 2048,
+        height: 2048,
+        crop: 'limit',
+      },
+    ],
   })
 
   await adminDb.collection(COLLECTION).doc(id).set({
@@ -260,19 +301,20 @@ async function clearFeatured() {
 async function resetDatabase() {
   console.log('\n⚠️  DANGER: This will DELETE ALL PHOTOS')
 
-  const first = prompt('Type RESET to continue: ')
+  const first = prompt('Type RESET to confirm: ')
   if (first !== 'RESET') return
-
-  const second = prompt('Type DELETE ALL to confirm: ')
-  if (second !== 'DELETE ALL') return
 
   const snapshot = await db.collection(COLLECTION).get()
   const batch = db.batch()
 
   snapshot.docs.forEach(doc => batch.delete(doc.ref))
   await batch.commit()
+  
+  console.log('Firebase cleared')
+  // Cloudinary
+  await resetCloudinary()
 
-  console.log('💥 Database wiped')
+  console.log('Cloudinary cleared')
 }
 
 function renderProgress(done: number, total: number) {
@@ -293,6 +335,32 @@ function renderProgress(done: number, total: number) {
   }
 }
 
+// Reset Cloudinary
+async function resetCloudinary() {
+  let nextCursor: string | undefined = undefined
+
+  do {
+    const result = await cloudinary.api.resources({
+      type: 'upload',
+      prefix: CLOUDINARY_FOLDER,
+      max_results: 100,
+      next_cursor: nextCursor,
+    })
+
+    if (result.resources.length === 0) break
+
+    const publicIds = result.resources.map(
+      (r: any) => r.public_id
+    )
+
+    await cloudinary.api.delete_resources(publicIds)
+
+    nextCursor = result.next_cursor
+  } while (nextCursor)
+
+  console.log('🗑️ Cloudinary folder wiped')
+}
+
   
 // ---------- Main Menu ----------
 async function main() {
@@ -302,7 +370,7 @@ What do you want to do?
 1) Upload photos
 2) Set featured photos
 3) Remove all featured photos
-4) Reset database (DANGEROUS)
+4) Reset database (PROCEED WITH CAUTION)
 5) Exit
 `)
 
