@@ -25,15 +25,9 @@ This CLI is designed to be safe, repeatable, and idempotent. Duplicate photos 
 ## Project Structure
 ```
 project-root/
-│
-├── src/
-│   ├── scripts/
-│   │   └── photos-cli.ts        # Main CLI entry point
-│   └── lib/
-│       └── firebase-admin.ts
-│
+├── photos-cli.ts                # Main CLI entry point
+├── firebase-admin.ts
 ├── .env
-├── tsconfig.json
 ├── package.json
 └── README.md
 ```
