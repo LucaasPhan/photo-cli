@@ -376,12 +376,12 @@ async function resetCloudinary() {
 async function main() {
   while (true) {
     console.log(`
-                What do you want to do?
-                1) Upload photos
-                2) Set featured photos
-                3) Remove all featured photos
-                4) Reset database (PROCEED WITH CAUTION)
-                5) Exit
+What do you want to do?
+1) Upload photos
+2) Set featured photos
+3) Remove all featured photos
+4) Reset database (PROCEED WITH CAUTION)
+5) Exit
                 `)
 
     const choice = prompt('Select an option: ')
