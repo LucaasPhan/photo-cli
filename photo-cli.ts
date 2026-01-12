@@ -6,7 +6,7 @@ import promptSync from 'prompt-sync'
 import { adminDb } from './firebase-admin'
 import { v2 as cloudinary } from 'cloudinary'
 import crypto from "crypto"
-import { Stringifier } from 'postcss'
+import sharp from "sharp"
 const prompt = promptSync({ sigint: true })
 
 // Type
@@ -14,17 +14,6 @@ type PendingPhoto = {
   filePath: string
   hash: string
 }
-
-// Error handling
-class UploadError extends Error {
-    constructor(
-      message: string,
-      public file?: string
-    ) {
-      super(message)
-      this.name = 'UploadError'
-    }
-  }
   
 // ---------- Firebase ----------
 const db = adminDb
@@ -57,6 +46,37 @@ function hashFile(filePath: string): Promise<string> {
 
 function pad(num: number) {
   return num.toString().padStart(4, '0')
+}
+
+async function resizeToLimit(
+  inputPath: string,
+  outputPath: string,
+  maxSizeBytes: number
+) {
+  let quality = 80
+  let buffer: Buffer
+
+  // First resize to cap dimensions
+  let image = sharp(inputPath).resize({
+    width: 2048,
+    height: 2048,
+    fit: "inside",
+    withoutEnlargement: true
+  })
+
+  while (true) {
+    buffer = await image
+      .jpeg({ quality, mozjpeg: true })
+      .toBuffer()
+
+    if (buffer.length <= maxSizeBytes || quality <= 40) {
+      break
+    }
+
+    quality -= 10
+  }
+
+  await fs.promises.writeFile(outputPath, buffer)
 }
 
 async function hashExists(hash: string): Promise<boolean> {
@@ -214,38 +234,22 @@ async function processPhoto(
   }
 
   const exif = await exifr.parse(filePath, {
-    pick: [
-      'Model',
-      'FNumber',
-      'ExposureTime',
-      'ISO',
-      'DateTimeOriginal',
-    ],
+    pick: ['Model', 'FNumber', 'ExposureTime', 'ISO', 'DateTimeOriginal'],
   })
 
-  const upload = await cloudinary.uploader.upload(filePath, {
+  // Resize photo before upload
+  const resizedPath = filePath.replace(/\.\w+$/, `_resized.jpg`)
+
+  await resizeToLimit(filePath, resizedPath, 10 * 1024 * 1024) // 10MB  
+
+  const upload = await cloudinary.uploader.upload(resizedPath, {
     folder: CLOUDINARY_FOLDER,
     public_id: id,
     unique_filename: false,
     overwrite: false,
-  
-    transformation: [
-      // If width is the long side and > 2048
-      {
-        if: 'w_gt_2048',
-        width: 2048,
-        height: 2048,
-        crop: 'limit',
-      },
-      // If height is the long side and > 2048
-      {
-        if: 'h_gt_2048',
-        width: 2048,
-        height: 2048,
-        crop: 'limit',
-      },
-    ],
   })
+
+  fs.unlinkSync(resizedPath)
 
   await adminDb.collection(COLLECTION).doc(id).set({
     title: id,
